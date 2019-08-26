@@ -13,6 +13,8 @@ odoo.define('pos_chat_button', function (require){
     var all_timeOuts = [];
     var chat_users = [];
     var messages_cnt = [];
+    var can_change_name = true;
+    var new_names = [];
 
     var class_array = [];
 
@@ -64,6 +66,17 @@ odoo.define('pos_chat_button', function (require){
             }
             else if(data.command == 'Disconnect')
                 DeleteUser(data.uid);
+            else if(data.command == 'SetName')
+            {
+                // In this case data.uid isn't the user id, it's
+                // an user number
+                SetName(data.message, data.uid);
+            }
+            else if(data.command == 'STOP')
+            {
+                can_change_name = false;
+                ShowUsers();
+            }
             else
                 AddNewMessage(data);
 
@@ -128,12 +141,14 @@ odoo.define('pos_chat_button', function (require){
     {
         chat_users.push({
             name : user_data.name,
-            uid : user_data.uid
+            uid : user_data.uid,
+            name_changed : false
         });
 
         all_messages.push(new Array());
         all_timeOuts.push(new Array());
         messages_cnt.push(0);
+        new_names.push('');
 
         ShowUsers();
     }
@@ -142,6 +157,19 @@ odoo.define('pos_chat_button', function (require){
     {
         DeleteUserData(user_id);
         ShowUsers();
+    }
+
+    function SetName(new_name, num)
+    {
+        new_names[num] = new_name;
+
+        if(all_names_changed())
+            self._rpc({
+                model: "pos.chat",
+                method: "send_field_updates",
+                args: ['',
+                 'STOP', 0]
+            });
     }
 
 //----------Set avatar and animation part--------------
@@ -153,11 +181,18 @@ odoo.define('pos_chat_button', function (require){
         var out = '';
         chat_users.forEach(function (item)
         {
+            if(item.uid == session.uid)
+                new_names[NumInQueue(item.uid)] == 'NaN';
+            // User
             out += '<div class="chat-user-'+item.uid+'" id="picture-'+NumInQueue(item.uid)+'">';
+            // User temp name
+            if(!can_change_name && item.uid != session.uid)
+                out += '<div class="chat-user-name">'+new_names[NumInQueue(item.uid)]+'</div>'
+            // Image
             out += '<img src="/web/image/res.users/' +
             item.uid + '/image_small" id="ava-' +
             NumInQueue(item.uid)+'" class="avatar"></img>';
-
+            // Users messages
             out += '<ul class="new-message" id="message-id-'+item.uid+'"></ul>';
             out += '</div>';
         });
@@ -194,7 +229,27 @@ odoo.define('pos_chat_button', function (require){
 
         var newMessage = document.getElementById('text-line');
 
-        if(!is_it_tag(newMessage.value))
+        // False means to not return parsed string
+        if(is_it_name(newMessage.value, false))
+        {
+            var num_to_send = 0;
+            if(session.uid == chat_users[chat_users.length - 1].uid)
+                num_to_send = 0;
+            else
+                num_to_send = NumInQueue(session.uid) + 1;
+            if(can_change_name && chat_users.length > 1)
+            {
+                self._rpc({
+                    model: "pos.chat",
+                    method: "send_field_updates",
+                    args: [is_it_name(newMessage.value, true),
+                     'SetName', num_to_send]
+                });
+            }
+            else
+                alert("Time is out or you're alone in the chat room, you can't change the name");
+        }
+        else if(!is_it_tag(newMessage.value))
         {
             self._rpc({
                 model: "pos.chat",
@@ -318,6 +373,50 @@ odoo.define('pos_chat_button', function (require){
             return true;
         else
             return false;
+    }
+
+    function is_it_name(str, parse)
+    {
+        var meet_double_dot = false;
+        var temp = '';
+        var temp_name = '';
+        for(var i = 0; i < str.length; i++)
+        {
+            if(str[i] == ':') {
+                meet_double_dot = true;
+                continue;
+            }
+
+            if(str[i] == ' ' && !meet_double_dot) {
+                continue;
+            }
+
+            if(!meet_double_dot)
+                temp += str[i];
+            else
+                temp_name +=str[i];
+        }
+        if(parse)
+        {
+            return temp_name;
+        }
+        else
+        {
+            if(temp_name.length != str.length - 1
+            && temp_name.length > 0 && (temp == 'Set' || temp == 'set'))
+                return true;
+            else
+                return false;
+        }
+    }
+
+    function all_names_changed()
+    {
+        for(var i = 0; i < new_names.length; i++)
+        {
+            if(new_names[i] == '') return false;
+        }
+        return true;
     }
 //    $("." + message_class + "").fadeIn();
 //    var disappear_bool_timer = window.setTimeout(function(){disappeared_first = true;},5000);
